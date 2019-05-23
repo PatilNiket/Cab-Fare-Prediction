@@ -1,0 +1,381 @@
+import os
+import pandas as pd
+import numpy as np
+import collections as defaultdict
+from scipy.stats import hmean
+from scipy.spatial.distance import cdist
+from scipy import stats
+import numbers
+from fancyimpute import KNN 
+from sklearn.preprocessing import StandardScaler
+from sklearn.datasets import make_blobs
+import matplotlib.pyplot as plt
+from scipy.stats import chi2_contingency
+import seaborn as sns
+from random import randrange, uniform
+
+################# Set current Workind Directory #########################
+os.chdir("C:/Users/User/Desktop/Project 3")
+os.getcwd()
+
+#################### Load CSV #################################
+cab_train = pd.read_csv("train_cab.csv")
+
+cab_train.head()
+
+################## EDA ##################
+############################# Find The Datatypes ##############################
+cab_train.dtypes
+############################# convert catagoric to numeric ####################
+cab_train['fare_amount'] = cab_train['fare_amount'].convert_objects(convert_numeric=True)
+
+############################# Convert object to datetime ###################### 
+from datetime import datetime
+import calendar
+cab_train.pickup_datetime = pd.to_datetime(cab_train.pickup_datetime, errors='coerce')
+
+############## get info of all attributes ##################
+cab_train.info()
+
+######################## Split Data time ##########################
+cab_train['pickup_year']= cab_train['pickup_datetime'].dt.year
+cab_train['pickup_month']=cab_train['pickup_datetime'].dt.month
+cab_train['pickup_day_of_month']=cab_train['pickup_datetime'].dt.day
+cab_train['pickup_hour']=cab_train['pickup_datetime'].dt.hour
+cab_train['pickup_minute']=cab_train['pickup_datetime'].dt.minute
+cab_train['pickup_second']=cab_train['pickup_datetime'].dt.second
+#cab_train['pickup_weekday_name']=cab_train['pickup_datetime'].dt.weekday_name
+
+cab_train.head()
+
+###################### Drop pickup_datetime ######################
+
+cab_train = cab_train.drop(['pickup_datetime'], axis=1) 
+
+
+cab_train = cab_train[cab_train['pickup_longitude']!=0]
+cab_train = cab_train[cab_train['pickup_latitude']!=0]
+cab_train = cab_train[cab_train['dropoff_longitude']!=0]
+cab_train = cab_train[cab_train['dropoff_latitude']!=0]
+###################### Calutlate the distance using latlong #######################
+
+from math import sin, cos, sqrt, atan2, radians,asin
+
+#Calculate the great circle distance between two points on the earth (specified in decimal degrees)
+
+def haversine_np(lon1, lat1, lon2, lat2):
+    
+    # Convert latitude and longitude to radians
+    lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
+
+    # Find the differences
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+
+    # Apply the formula 
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    
+    # Calculate the angle (in radians)
+    c = 2 * np.arcsin(np.sqrt(a))
+    
+    # Convert to kilometers
+    km = 6367 * c
+    
+    return km
+
+cab_train['Trip_distance_KM'] =  haversine_np(cab_train['pickup_longitude'], cab_train['pickup_latitude'],
+                        cab_train['dropoff_longitude'], cab_train['dropoff_latitude']) 
+
+
+################## Trip_distance_KM describtion ################
+
+cab_train["Trip_distance_KM"].describe()
+
+##################### Visualisatin of Trip Fare ###################
+plt.figure(figsize=(14,7))
+sns.kdeplot(cab_train['fare_amount']).set_title("Visualisation of Trip Fare")
+cab_train.loc[cab_train['fare_amount']<0].shape
+cab_train["fare_amount"].describe()
+
+########### Trip fare should not be -ve so here we drop the -ve values ####################
+cab_train=cab_train.loc[cab_train['fare_amount']>0]
+cab_train.shape
+
+###################################### Visualisation of passenger_count ################################
+plt.figure(figsize=(14,7))
+sns.kdeplot(cab_train['passenger_count']).set_title("Visualisation of passenger_count")
+
+
+################################ Passenger count is in between 1 to 6 ########################
+cab_train=cab_train[cab_train['passenger_count']<=6]
+cab_train=cab_train[cab_train['passenger_count']>=1]
+cab_train["passenger_count"].describe()
+
+############################## Bar plot of fare amount vs passenger count ####################################
+plt.figure(figsize=(20,5))
+sns.barplot(x='passenger_count',y='fare_amount',data=cab_train).set_title(" Fare Amount vs passenger count")
+
+############################## Bar plot of fare amount vs Pickup year ####################################
+plt.figure(figsize=(20,5))
+sns.barplot(x='pickup_month',y='fare_amount',data=cab_train).set_title(" Fare Amount vs month")
+
+## Trip distance vs fare amount
+plt.scatter(x=cab_train['Trip_distance_KM'],y=cab_train['fare_amount'])
+plt.xlabel("Trip Distance")
+plt.ylabel("Fare Amount")
+plt.title("Trip Distance vs Fare Amount")
+
+############################ storing the EDA data in df ###########################
+bf = cab_train
+#cab_train = bf
+
+########################### DATA PREPROCESSING ##############
+
+###################################### MISSING VALUE ANALYSIS ##################################################################
+
+#Create dataframe with missing percentage
+missing_val = pd.DataFrame(cab_train.isnull().sum())
+#Reset index
+missing_val = missing_val.reset_index()
+#Rename variable
+missing_val = missing_val.rename(columns = {'index': 'Variables', 0: 'Missing_percentage'})
+#Calculate percentage
+missing_val['Missing_percentage'] = (missing_val['Missing_percentage']/len(cab_train))*100
+#descending order
+missing_val = missing_val.sort_values('Missing_percentage', ascending = False).reset_index(drop = True)
+
+missing_val
+
+# Actual = 40.774138
+#Mean = 39.914672005073626
+#Median = 40.752603
+#Mode = 41.25456
+cab_train['pickup_latitude'].loc[7]
+
+#create missing value
+cab_train['pickup_latitude'].loc[7] = np.nan
+
+################ Here We select median method #####################
+cab_train['pickup_year']= cab_train['pickup_year'].fillna(cab_train['pickup_year'].median())
+cab_train['pickup_month']= cab_train['pickup_month'].fillna(cab_train['pickup_month'].median())
+cab_train['pickup_day_of_month']= cab_train['pickup_day_of_month'].fillna(cab_train['pickup_day_of_month'].median())
+cab_train['pickup_hour']= cab_train['pickup_hour'].fillna(cab_train['pickup_hour'].median())
+cab_train['pickup_minute']= cab_train['pickup_minute'].fillna(cab_train['pickup_minute'].median())
+cab_train['pickup_second']= cab_train['pickup_second'].fillna(cab_train['pickup_second'].median())
+
+cab_train.isnull().sum()
+
+#################  MEAN METHOD #################
+#cab_train['pickup_latitude']= cab_train['pickup_latitude'].fillna(cab_train['pickup_latitude'].mean())
+################# MODE METHOD #################
+#cab_train['pickup_latitude']= cab_train['pickup_latitude'].fillna(cab_train['pickup_latitude'].median())
+#cab_train = cab_train(KNN(k = 3).complete(cab_train), columns = cab_train.columns)
+
+######################## OUTLIERS ANALYSIS ###############
+
+########################### CANTINUOUS VARIABLES WITH TARGETVARIABLE#############################
+cnames = ['pickup_longitude','pickup_latitude','dropoff_longitude','dropoff_latitude','Trip_distance_KM','fare_amount']
+######################################### OUTLIER ANALYSIS ########################################
+plt.figure(figsize=(20,7))
+plt.boxplot(cab_train['fare_amount'])
+plt.xlabel('fare_amount')
+plt.ylabel('Count')
+plt.title("BoxPlot of fare_amount")
+
+##### BOX PLOT FOR TRIP DISTANCE IN KM
+plt.figure(figsize=(21,7))
+plt.boxplot([cab_train['Trip_distance_KM']])
+plt.title('BOXPLOT METHOD')
+plt.xlabel(['Trip_distance_KM'])
+plt.ylabel('count')
+
+############################## Box plot method to remove the outliers ##############################
+for i in cnames:
+         print(i)
+         q75, q25 = np.percentile(cab_train.loc[:,i], [75 ,25])
+         print("75% ="+ str(q75))
+         print("25% ="+ str(q25))   
+         iqr = q75 - q25
+         print("IQR ="+ str(iqr))
+         min = q25 - (iqr*1.5)
+         max = q75 + (iqr*1.5)
+         print("Min="+ str(min))
+         print("Max="+ str(max))
+            
+# To remove the Outliers                    
+cab_train = cab_train.drop(cab_train[cab_train.loc[:,i] < min].index)
+cab_train = cab_train.drop(cab_train[cab_train.loc[:,i] > max].index)
+   
+
+################# FEATURE SELECTION ##################
+
+########################### CANTINUOUS VARIABLES WITH TARGETVARIABLE#############################
+cnames = ['pickup_longitude','pickup_latitude','dropoff_longitude','dropoff_latitude','Trip_distance_KM']
+
+################################################# Feature Selection #####################################################
+#Correlation analysis
+#Correlation plot
+df_corr = cab_train.loc[:,cnames]
+#Set the width and hieght of the plot
+f, ax = plt.subplots(figsize=(13, 12))
+#Generate correlation matrix
+corr = df_corr.corr()
+#Plot using seaborn library
+sns.heatmap(corr, mask=np.zeros_like(corr, dtype=np.bool), cmap=sns.diverging_palette(220, 10, as_cmap=True), annot = True, square=True, ax=ax)
+plt.plot()  
+
+########################## CATAGARICAL VARIABLES ###############################
+cat_names = ['pickup_year','pickup_month','pickup_day_of_month','pickup_hour','pickup_minute','pickup_second','passenger_count']
+#Here we are using ANOVA test for catagorical attributes  
+for i in cat_names:
+    f, p = stats.f_oneway(cab_train[i], cab_train["fare_amount"])
+    print("P value for variable "+str(i)+" is "+str(p))
+    print("f value for variable "+str(i)+" is "+str(f))
+    
+# drop the variables those who are highly correlated
+cab_train = cab_train.drop(['pickup_latitude','pickup_longitude','dropoff_longitude','dropoff_latitude'], axis=1)
+P = cab_train
+P.to_csv("train_Visualisation.csv",index=False)
+
+######################################### FEATURE SCALING ######################
+#Normality check
+plt.figure(figsize=(20,7))
+plt.hist(cab_train['Trip_distance_KM'], bins='auto')
+plt.xlabel('Trip_distance_KM')
+plt.ylabel('Count')
+plt.title('Histogram to check normality')
+    
+cnames = ['Trip_distance_KM', 'fare_amount']
+# As our variables are left sckew here we select Nomalisation method 
+for i in cnames:
+    print(i)
+    if i == 'fare_amount':
+        continue
+    cab_train[i] = (cab_train[i] - cab_train[i].min())/(cab_train[i].max()-cab_train[i].min())
+Trip_distance_KM
+fare_amount
+#################################### saveing data of preprocessing in pf ####################################
+
+#cab_train.to_csv("train_sample1.csv",index=False)
+pf= cab_train
+cab_train.shape
+#cab_train = pf
+(14226, 9)
+5. Dummy Variables
+###################### Get dummy variables for categorical variables  ##################################
+df = pd.get_dummies(data = cab_train, columns = cat_names)
+df = df.drop(['passenger_count_1.3'], axis=1)
+df.shape
+#df_A = df
+
+(14226, 202)
+df_A = df
+df.to_csv("train_sample.csv",index=False)
+######################### Devide data into train and test ########################
+from sklearn.model_selection import train_test_split
+Y = df['fare_amount']
+df.drop(['fare_amount'], inplace = True, axis=1)
+X = df
+# Using train_test_split sampling function for test and train data split
+X_train, X_test, y_train, y_test = train_test_split(X,Y, test_size=0.2)
+X_test.shape
+
+##############################    RF       #####################################
+​
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score
+​
+model = RandomForestRegressor(n_estimators=100, random_state=0).fit(X_train, y_train)
+​
+y_pred = model.predict(X_train)
+print('Root Mean Squared Error for train:', np.sqrt(mean_squared_error(y_train, y_pred)))  
+​
+test_pred = model.predict(X_test)
+print('Root Mean Squared Error for test:', np.sqrt(mean_squared_error(y_test,test_pred))) 
+​
+## R2 ##
+print("R^2 Score = "+str(r2_score(y_test,test_pred)))
+​
+Root Mean Squared Error for train: 0.8342412966487998
+Root Mean Squared Error for test: 2.2222441831632613
+R^2 Score = 0.6885217505821997
+2. Linear regression
+#Import libraries for LR
+import statsmodels.api as sm
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score
+​
+# Train the model using the training sets
+model = sm.OLS(y_train, X_train).fit()
+​
+# predictions for train model
+predictions_LR = model.predict(X_train)
+# Calulating RMSE
+print('Root Mean Squared Error of train:', np.sqrt(mean_squared_error(y_train, predictions_LR)))
+​
+# predictions for train model
+predictions_LR = model.predict(X_test)
+# Calulating RMSE
+print('Root Mean Squared Error of test:', np.sqrt(mean_squared_error(y_test,predictions_LR)))
+​
+## R2 ##
+print("R^2 Score = "+str(r2_score(y_test,predictions_LR)))
+​
+Root Mean Squared Error of train: 3.406019630290123
+Root Mean Squared Error of test: 3.315523866502557
+R^2 Score = 0.30665644006299575
+
+###################################### Gradient Boosting  ######################################33
+​
+# Importing library 
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score
+​
+# Building model on top of training dataset
+fit_GB = GradientBoostingRegressor().fit(X_train, y_train)
+​
+# Calculating RMSE for training data to check for over fitting
+pred_train = fit_GB.predict(X_train)
+# Calulating RMSE
+print('Root Mean Squared Error of train:', np.sqrt(mean_squared_error(y_train, pred_train)))
+​
+# Calculating RMSE for test data to check accuracy
+pred_test = fit_GB.predict(X_test)
+# Calulating RMSE
+print('Root Mean Squared Error of test:', np.sqrt(mean_squared_error(y_test,pred_test)))
+print("R^2 Score for test(coefficient of determination) = "+str(r2_score(y_test,pred_test)))
+​
+Root Mean Squared Error of train: 2.054400325878095
+Root Mean Squared Error of test: 2.1215625146618264
+R^2 Score for test(coefficient of determination) = 0.7161062472440993
+D. Predicting the new test case
+train = df_A 
+y_train= df_A['fare_amount']
+df_A.drop(['fare_amount'], inplace = True, axis=1)
+X_train = df
+
+#################### Load CSV #################################
+test = pd.read_csv("test_sample.csv")
+X_test = test
+X_test.shape
+(9914, 201)
+
+###################################### Gradient Boosting  ######################################33
+​
+# Importing library 
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import r2_score
+​
+# Building model on top of training dataset
+fit_GB = GradientBoostingRegressor().fit(X_train, y_train)
+# 
+pred_test = fit_GB.predict(X_test)
+​
+Root Mean Squared Error of train: 2.0616956653625538
+Test_prediction = pd.DataFrame(pred_test)
+Test_prediction.describe()
+
+test.to_csv("test_predict.csv",index=False)
